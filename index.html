@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Groq Voice Assistant</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 0 auto; padding: 16px; background: #0f172a; color: #e2e8f0; }
+  h1 { font-size: 1.4rem; }
+  input, select, button { padding: 10px; border-radius: 8px; border: 1px solid #334155; background: #1e293b; color: inherit; font-size: 1rem; }
+  input { width: 100%; box-sizing: border-box; margin-bottom: 8px; }
+  button { cursor: pointer; background: #2563eb; border: none; }
+  button.listening { background: #dc2626; }
+  .row { display: flex; gap: 8px; margin-bottom: 12px; }
+  #chat { height: 50vh; overflow-y: auto; background: #1e293b; border-radius: 8px; padding: 12px; }
+  .msg { margin: 8px 0; padding: 8px 12px; border-radius: 8px; max-width: 85%; white-space: pre-wrap; }
+  .user { background: #334155; margin-left: auto; }
+  .bot { background: #1d4ed8; }
+  small { color: #94a3b8; }
+</style>
+</head>
+<body>
+  <h1>🎙️ Groq Voice Assistant</h1>
+  <input id="key" type="password" placeholder="Apni Groq API key yahan paste karein (sirf aapke browser mein save hoti hai)">
+  <div class="row">
+    <select id="lang">
+      <option value="en-IN">English (India)</option>
+      <option value="hi-IN">Hindi</option>
+      <option value="en-US">English (US)</option>
+    </select>
+    <button id="mic" style="flex:1">🎤 Bolna shuru karein</button>
+  </div>
+  <div id="chat"></div>
+  <p><small>Chrome ya Edge use karein. Mic permission allow karni hogi.</small></p>
+
+<script>
+const MODEL = "openai/gpt-oss-120b";
+const keyInput = document.getElementById("key");
+const langSel = document.getElementById("lang");
+const micBtn = document.getElementById("mic");
+const chat = document.getElementById("chat");
+
+keyInput.value = localStorage.getItem("groq_key") || "";
+keyInput.addEventListener("change", () => localStorage.setItem("groq_key", keyInput.value.trim()));
+
+const history = [{ role: "system", content: "You are a helpful voice assistant. Keep answers short and conversational. Reply in the same language the user speaks." }];
+
+function addMsg(text, cls) {
+  const d = document.createElement("div");
+  d.className = "msg " + cls;
+  d.textContent = text;
+  chat.appendChild(d);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function speak(text) {
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = langSel.value;
+  speechSynthesis.speak(u);
+}
+
+async function askGroq(text) {
+  const key = keyInput.value.trim();
+  if (!key) { addMsg("Pehle upar Groq API key paste karein.", "bot"); return; }
+  history.push({ role: "user", content: text });
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
+      body: JSON.stringify({ model: MODEL, messages: history, temperature: 0.7, max_tokens: 512 })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || res.status);
+    const reply = data.choices[0].message.content;
+    history.push({ role: "assistant", content: reply });
+    addMsg(reply, "bot");
+    speak(reply);
+  } catch (e) {
+    addMsg("Error: " + e.message, "bot");
+  }
+}
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SR) {
+  micBtn.disabled = true;
+  addMsg("Is browser mein speech recognition support nahi hai. Chrome ya Edge use karein.", "bot");
+} else {
+  const rec = new SR();
+  rec.interimResults = false;
+  rec.onstart = () => { micBtn.classList.add("listening"); micBtn.textContent = "🔴 Sun raha hoon..."; };
+  rec.onend = () => { micBtn.classList.remove("listening"); micBtn.textContent = "🎤 Bolna shuru karein"; };
+  rec.onerror = (e) => addMsg("Mic error: " + e.error, "bot");
+  rec.onresult = (e) => {
+    const text = e.results[0][0].transcript;
+    addMsg(text, "user");
+    askGroq(text);
+  };
+  micBtn.onclick = () => { rec.lang = langSel.value; rec.start(); };
+}
+</script>
+</body>
+</html>
